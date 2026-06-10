@@ -154,6 +154,20 @@ def test_noop_when_script_changes_nothing(engine, conn):
     assert sorted(e for e, _ in engine.recorded) == ["noop"] * 3
 
 
+def test_publish_failure_fails_subtask(engine, conn, project):
+    # An unreachable push target must fail the subtask (VERIFIED -> FAILED),
+    # not crash the sync pass.
+    hcl = (project / "demo.hcl").read_text().replace(
+        'driver = "fake"',
+        'driver   = "fake"\n    push_url = "/nonexistent/push-target.git"')
+    (project / "demo.hcl").write_text(hcl)
+    engine.register(project / "demo.hcl")
+    engine.sync()
+    assert set(states(conn).values()) == {st.FAILED}
+    assert all("publish" in s["last_error"] or "push" in s["last_error"]
+               for s in db.list_subtasks(conn))
+
+
 def test_postmod_failure(engine, conn):
     write_script(engine.project / "postmod.sh", "exit 3\n")
     engine.register(engine.project / "demo.hcl")
