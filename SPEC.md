@@ -1,84 +1,92 @@
 # Codemods — Specification
 
-Version 0.2 (draft). The key words MUST, SHOULD, and MAY are to be
+Version 0.3 (draft). The key words MUST, SHOULD, and MAY are to be
 interpreted as in RFC 2119.
 
-This document describes the philosophy and architecture of **codemods**: a
-system for landing large mechanical changes in large organizations by
-splitting them into independently reviewable units. It deliberately avoids
-prescribing technologies. A companion document,
-[EXAMPLE_SPEC.md](EXAMPLE_SPEC.md), makes every choice concrete for the
-reference implementation that ships in this repository; treat this document
-as the contract an implementation must honor, and EXAMPLE_SPEC.md as one
-fully worked instantiation of it.
+## Scope
 
-## 1. Motivation
+This document describes the structure of a **codemods** system: the
+components it consists of, the lifecycle it manages, the guarantees it must
+provide, and the points at which it must be adapted to a particular
+organization's software-development-lifecycle stack.
 
-Large mechanical changes — a `clang-tidy -fix` sweep, an API rename, a
-header reshuffle, a lint-rule rollout — are easy to *generate* and hard to
-*land*. Applied as one commit in an organization with 1000+ engineers, the
-review fans out to every code-owner group the change touches; a single
-change can demand sign-off from 100+ reviewers, stall indefinitely, and rot
-against a moving main branch.
+It is written for someone implementing the system from scratch. Because the
+system integrates with organization-specific infrastructure at nearly every
+boundary (version control, code review, notification, machine provisioning,
+state storage), a shared off-the-shelf implementation is usually
+impractical; the expectation is that each enterprise — sometimes each major
+repository — implements its own, against this document.
 
-The fix is social as much as technical: deliver each owner a review scoped
-to what they own, small enough to be read, while a machine tracks the
-long tail — the run that failed, the review nobody answered, the directory
-that vanished in a refactor — for weeks if necessary. Codemods is that
-machine.
+This repository also contains one complete working implementation (Python,
+PostgreSQL, git, GitHub, email), specified prescriptively in
+[EXAMPLE_SPEC.md](EXAMPLE_SPEC.md). It exists for guidance: it shows what an
+end-to-end conforming system looks like, including a worked state machine,
+schema, and driver set. It is an example, not the product.
 
-## 2. Philosophy
+## 1. Problem
 
-**The unit of work is the unit of review.** A campaign is decomposed by
-whatever boundary the organization reviews along — a file, a directory, a
-build target, a code-owner group. Everything downstream (execution,
-verification, review, notification) happens per unit, so no reviewer ever
-faces more than their own slice.
+A large mechanical change (a `clang-tidy -fix` sweep, an API rename, a
+lint-rule rollout) applied as a single commit in a large organization
+produces a review whose required-reviewer set spans every code-owner group
+the change touches. Such reviews routinely require sign-off from dozens to
+hundreds of reviewers, stall, and go stale against the moving base branch.
 
-**Bespoke logic lives in scripts; orchestration lives in the system.** Every
-organization builds, tests, and selects tests differently. Codemods does not
-model any of that: the transformation (*run*) and verification (*postmod*)
-are opaque executables supplied by the campaign author, with a deliberately
-tiny contract (§5). The orchestrator only knows how to schedule them,
-observe their exit codes, and capture what they changed.
+A codemods system addresses this by splitting the change into units scoped
+to a review boundary (a file, a directory, a build target, a code-owner
+group), executing and verifying the change per unit, opening one review per
+unit, and tracking each unit's progress in a database over the days or
+weeks the campaign takes to land.
 
-**All state lives in a durable store; processes are disposable.** The
+## 2. Design constraints
+
+The following constraints shape the structure described in this document.
+
+**The unit of work is the unit of review.** Decomposition happens along
+whatever boundary the organization reviews by. All downstream machinery
+(execution, verification, review, notification) operates per unit.
+
+**Bespoke logic lives in scripts.** Build systems, test selection, and the
+transformations themselves vary per repository and are not modeled by the
+system. The transformation (*run*) and verification (*postmod*) steps are
+opaque executables supplied by the campaign author under a small fixed
+contract (§5). The system schedules them, observes exit codes, and captures
+resulting changes.
+
+**State lives in a durable store; processes are disposable.** The
 orchestrator is a *reconciler*: each invocation reads the store, advances
-whatever can be advanced, and exits. Killing it at any instant MUST NOT lose
-or corrupt state — progress checkpoints are written *before* effects where a
-re-run is cheap, and *after* effects where a re-run must be avoided.
-Long-lived daemons, cron jobs, and one-shot CLI runs are all valid drivers
-of the same state machine.
+what can be advanced, and exits. Termination at any instant MUST NOT lose
+or corrupt state. Progress is checkpointed before effects where re-running
+is cheap, and after effects where duplication must be avoided. The same
+state machine can be driven by a one-shot CLI, cron, or a daemon.
 
-**Every step is idempotent from its checkpoint.** Recovery from a crash is
-re-running the step, never replaying history. Steps that create external
-artifacts (a pushed branch, an open review) MUST detect an artifact created
-by a previous, interrupted attempt and adopt it rather than duplicate it.
+**Steps are idempotent from their checkpoint.** Crash recovery is
+re-running the current step, not replaying history. Steps that create
+external artifacts (a pushed branch, an open review) MUST detect an
+artifact left by an interrupted previous attempt and adopt it rather than
+create a duplicate.
 
-**Adaptation happens at named seams, not by forking the orchestrator.**
-Everything organization-specific — version control, review tooling,
-notification channels, machine provisioning, the state store itself — sits
-behind a driver interface (§6). A conforming implementation swaps drivers;
-the lifecycle, guarantees, and operator surface stay recognizably the same.
+**Organization-specific behavior sits behind interfaces.** Each integration
+boundary (§6) is a driver with a defined contract. The lifecycle,
+guarantees, and operator surface do not depend on which drivers are in use.
 
-**Operators see and repair everything.** Reality drifts from the database:
-reviews get closed by hand, checkouts get deleted, owners disappear from
-CODEOWNERS. The system MUST expose its full state for inspection, record an
-append-only audit trail, and ship a *doctor* that detects drift and — only
-when asked — repairs it.
+**State drifts from reality and must be repairable.** Reviews get closed
+out-of-band, checkouts get deleted, owners disappear from ownership files.
+The system MUST expose its state for inspection, keep an append-only audit
+log, and provide a *doctor* facility that detects drift and repairs it only
+on explicit request.
 
-## 3. System model
+## 3. Components
 
-| Concept | Definition |
+| Component | Role |
 |---|---|
-| **Codemod** | A named, registered change campaign: configuration + a *run* script + an optional *postmod* script + a decomposition rule. |
+| **Codemod** | A registered change campaign: configuration + a *run* script + an optional *postmod* script + a decomposition rule. |
 | **Unit** | One item produced by decomposition (a path, a target, an owner). Identified by its literal string value, unique within its codemod. |
 | **Subtask** | The durable lifecycle record of one unit within one codemod: state, workspace and review references, attempt count, logs, claim metadata. |
-| **Workspace** | An isolated, writable checkout of the target repository in which one subtask's scripts execute (a "worktree" in the git sense, a VM or container in others). |
-| **Driver** | A pluggable adapter for one organization-specific seam (§6). |
-| **Reconciler** | The engine that advances every non-terminal subtask toward a terminal state, one observable, durable step at a time. |
+| **Workspace** | An isolated, writable checkout of the target repository in which one subtask's scripts execute (a git clone or worktree, a container, a dev VM). |
+| **Driver** | An adapter implementing one integration boundary (§6). |
+| **Reconciler** | The engine that advances every non-terminal subtask toward a terminal state, one durable step at a time. |
 
-The flow of one subtask:
+Flow of one subtask:
 
 ```
 decompose ─▶ pending ─▶ transform (run script in fresh workspace)
@@ -92,11 +100,11 @@ decompose ─▶ pending ─▶ transform (run script in fresh workspace)
         (failures at any step are recorded, notified, and retryable)
 ```
 
-## 4. Lifecycle guarantees
+## 4. Lifecycle requirements
 
-Implementations choose their own state names and storage (EXAMPLE_SPEC.md §5
-and §6 give a complete worked state machine and schema); whatever the
-representation, the following are normative:
+Implementations choose their own state names and storage (EXAMPLE_SPEC.md
+§5 and §6 give a worked state machine and schema). Whatever the
+representation:
 
 - **Durability.** Entering and leaving a work-in-flight phase MUST be
   persisted: the store records that a script is about to run before it
@@ -105,48 +113,47 @@ representation, the following are normative:
 - **Mutual exclusion.** Work-in-flight phases are protected by a *claim* —
   an owner identity plus a lease — acquired with an atomic compare-and-swap,
   so concurrent reconcilers sharing one store never double-run a subtask.
-- **Crash recovery.** A subtask whose claim expired (or whose owner is
+- **Crash recovery.** A subtask whose claim has expired (or whose owner is
   provably dead) is recovered automatically: its workspace is discarded and
   it re-enters the last safe phase. Scripts MUST therefore tolerate being
   re-run from a fresh workspace.
-- **Empty changes are first-class.** A transformation that changes nothing
-  terminates the subtask as a no-op — no commit, no review, no reviewer
-  interruption.
+- **Empty changes terminate.** A transformation that changes nothing ends
+  the subtask as a no-op — no commit, no review.
 - **Review outcomes drive terminal states.** Merged ends the subtask
   successfully; closed-without-merge abandons it. Operators can retry
-  failures and abandon anything, and abandoning closes any open review.
+  failures and abandon any subtask; abandoning closes its open review.
 - **Notifications fire exactly once per subtask per event**, with delivery
   outcome recorded; failed deliveries are retried on later reconciliations.
 - **Audit.** Every state change, repair, and notification is recorded in an
   append-only event log.
 
-## 5. The script contract
+## 5. Script contract
 
-This is the universal interface between the orchestrator and the
-organization's bespoke logic, and it is intentionally minimal:
+The interface between the orchestrator and the organization's bespoke
+logic:
 
 - The *run* and *postmod* scripts are executables invoked with **one
   argument — the unit** — and the workspace root as working directory.
 - **Exit 0 means success**; anything else fails the subtask.
-- The orchestrator passes context through environment variables (at minimum
-  the codemod name, the unit, the workspace path, and the base revision; a
-  codeowners-style decomposition also supplies the unit's file list).
+- Context is passed through environment variables: at minimum the codemod
+  name, the unit, the workspace path, and the base revision. A
+  codeowners-style decomposition also supplies the unit's file list.
 - The *run* script's product is whatever it leaves changed in the
   workspace; the orchestrator commits it. Artifacts that must not land in
   review go in ignored locations.
-- *postmod* verifies the committed change — build, tests, whatever
-  repo-specific selection logic the organization encodes. Modifications it
-  leaves (e.g. a formatter pass) are folded into the change.
+- *postmod* verifies the committed change — build, tests, and any
+  repo-specific test-selection logic. Modifications it leaves (e.g. a
+  formatter pass) are folded into the change.
 - Script output MUST be captured to per-subtask logs reachable from the
   subtask record.
 
-## 6. Adaptation points
+## 6. Integration boundaries
 
-These are the seams along which organizations differ; each is a driver
-interface in a conforming implementation. EXAMPLE_SPEC.md §9 gives concrete
-signatures.
+These are the points at which an implementation binds to its
+organization's stack; each is a driver interface. EXAMPLE_SPEC.md §9 gives
+concrete signatures.
 
-| Seam | What varies | What the contract must preserve |
+| Boundary | What varies | What the contract must preserve |
 |---|---|---|
 | **Repository topology** | monorepo vs. many repos | a codemod targets one repository at one base revision |
 | **Version control** | git, svn, fossil, … | isolated workspaces, branch-equivalent publication, empty-change detection, commit-equivalent capture |
@@ -156,21 +163,21 @@ signatures.
 | **Workspace provisioning** | local clones, worktree pools, dev VMs, containers | fresh writable checkout of the base revision, disposable at any time, recreated on demand |
 | **Decomposition** | globs, explicit lists, command output, codeowners maps, build-graph queries | a deterministic-enough list of unique unit strings, re-evaluable to detect drift |
 
-## 7. Operator capabilities
+## 7. Operator surface
 
-A conforming implementation MUST offer, by CLI or UI:
+An implementation MUST offer, by CLI or UI:
 
-- **register** — submit or update a campaign; new units become subtasks,
-  existing subtasks are never disturbed, vanished units are reported (and
+- **register** — submit or update a campaign. New units become subtasks;
+  existing subtasks are never disturbed; vanished units are reported and
   cleaned up only by an explicit repair, never as a registration side
-  effect).
+  effect.
 - **reconcile** (*sync*) — advance everything advanceable; safe to run at
   any frequency, from anywhere that reaches the store.
 - **status** — per-subtask states and per-campaign rollups, human- and
   machine-readable.
-- **doctor** — detect drift between store and reality (stale claims, missing
-  workspaces, vanished units, orphaned reviews, orphaned workspaces);
-  repair only with an explicit flag, logging every repair.
+- **doctor** — detect drift between store and reality (stale claims,
+  missing workspaces, vanished units, orphaned reviews, orphaned
+  workspaces); repair only with an explicit flag, logging every repair.
 - **retry** / **abandon** — operator overrides for individual subtasks.
 
 ## 8. Configuration
@@ -179,10 +186,9 @@ A campaign is a declarative document naming the target repository and base
 revision, the decomposition rule, the two scripts, and the review and
 notification policies. The format is an implementation choice (HCL, TOML,
 JSON, …) but MUST support nested structure, string lists, comments, and
-embedded multi-line commands — decomposition-by-command is part of the
-philosophy (bespoke logic in scripts), not an extension. Re-registering an
-updated document updates policy for *future* steps only; history is never
-rewound.
+embedded multi-line commands (decomposition-by-command is a required
+capability, §6). Re-registering an updated document updates policy for
+*future* steps only; history is never rewound.
 
 ## 9. Conformance
 
@@ -190,17 +196,17 @@ An implementation conforms to this specification if it:
 
 1. decomposes campaigns into per-unit subtasks and executes the script
    contract of §5;
-2. provides the lifecycle guarantees of §4 on its chosen store;
-3. exposes the operator capabilities of §7;
-4. isolates the seams of §6 behind replaceable interfaces, including at
-   least one review driver that requires no external service (so the full
-   lifecycle is testable hermetically).
+2. provides the lifecycle requirements of §4 on its chosen store;
+3. exposes the operator surface of §7;
+4. isolates the boundaries of §6 behind replaceable interfaces, including
+   at least one review driver that requires no external service (so the
+   full lifecycle is testable hermetically).
 
-## 10. Reference implementation
+## 10. Relationship to the example implementation
 
-This repository contains a complete instantiation: Python + pixi,
-PostgreSQL, git worktrees by local clone, GitHub reviews via `gh`, SMTP
-email, HCL configuration, exercised end-to-end against a fork of curl.
-[EXAMPLE_SPEC.md](EXAMPLE_SPEC.md) specifies it prescriptively — exact
-config schema, state machine, SQL schema, driver signatures, CLI — and maps
-each section to the code in `src/codemods/`.
+[EXAMPLE_SPEC.md](EXAMPLE_SPEC.md) specifies the implementation in this
+repository: Python + pixi, PostgreSQL, git worktrees by local clone, GitHub
+reviews via `gh`, SMTP email, HCL configuration, a reconciler CLI,
+exercised end-to-end against a fork of curl. Consult it for a concrete
+state machine, schema, driver signatures, and operator CLI when
+implementing your own; none of its technology choices are normative.

@@ -5,13 +5,13 @@ small, per-unit changes that are run, verified, and code-reviewed
 independently — so a 100-reviewer mega-PR becomes N reviewable ones, tracked
 end-to-end in a database.
 
-- **[SPEC.md](SPEC.md)** — the general specification: philosophy,
-  architecture, lifecycle guarantees, and the adaptation points along which
-  enterprise stacks differ. Implementation-agnostic.
+- **[SPEC.md](SPEC.md)** — the general specification: system structure,
+  lifecycle requirements, and the integration boundaries where enterprise
+  stacks differ. Written for implementing the system from scratch.
 - **[EXAMPLE_SPEC.md](EXAMPLE_SPEC.md)** — the prescriptive spec of the
-  reference implementation: HCL config schema, exact state machine, SQL
+  example implementation: HCL config schema, exact state machine, SQL
   schema, driver signatures, CLI. One concrete instantiation of SPEC.md.
-- **`src/codemods/`** — the reference implementation: Python, PostgreSQL,
+- **`src/codemods/`** — the example implementation: Python, PostgreSQL,
   git worktrees by local clone, GitHub reviews via `gh`, email notification
   via SMTP. All orchestration lives in `engine.py` behind injectable driver
   interfaces; a file-backed fake review driver (`review/fake.py`) runs the

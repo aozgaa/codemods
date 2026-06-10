@@ -1,12 +1,15 @@
-# Codemods — Example Specification (Reference Implementation)
+# Codemods — Example Specification
 
 Version 0.2 (draft). The key words MUST, MUST NOT, SHOULD, and MAY are to be
 interpreted as in RFC 2119.
 
-This document is the prescriptive specification of the **reference
-implementation** in this repository: one concrete instantiation of the
-general [SPEC.md](SPEC.md). Where SPEC.md says "an implementation chooses",
-this document says exactly what *this* implementation chose:
+This document is the prescriptive specification of the example
+implementation in this repository: one concrete instantiation of the
+general [SPEC.md](SPEC.md). Per SPEC.md, organizations are expected to
+implement the system from scratch against their own stacks; this
+implementation exists to show what a complete, working, conforming system
+looks like end-to-end. Where SPEC.md says "an implementation chooses", this
+document records what this implementation chose:
 
 | Adaptation point (SPEC.md §6) | Choice here |
 |---|---|
@@ -20,17 +23,18 @@ this document says exactly what *this* implementation chose:
 | Configuration format | HCL |
 | Execution mode | reconciler CLI |
 
-An organization adapting codemods to a different stack should read SPEC.md
-for the contract and treat this document the way one treats a working
-example: steal the parts that fit, replace the drivers that don't.
+When implementing your own system, read SPEC.md for the requirements and
+use this document and the accompanying code as a worked example — the state
+machine, schema, and driver contracts here are known to satisfy SPEC.md,
+but none of the technology choices are normative.
 
 ## 1. Overview
 
 The implementation splits a repository-wide change into per-unit subtasks,
 runs the transformation per unit in an isolated clone, verifies each result,
 opens one GitHub PR per unit, and tracks every subtask through its full
-lifecycle in PostgreSQL. The motivation, philosophy, and normative
-guarantees live in SPEC.md; everything below is the concrete design — the
+lifecycle in PostgreSQL. The problem statement, design constraints, and
+normative requirements live in SPEC.md; everything below is the concrete design — the
 config schema, the state machine, the SQL schema, the driver signatures, and
 the CLI.
 
@@ -452,7 +456,7 @@ invocations; nothing in the schema or transitions changes.
 
 ## 11. Implementation map
 
-The reference implementation (Python, `pixi`-managed, PostgreSQL, GitHub via
+The example implementation (Python, `pixi`-managed, PostgreSQL, GitHub via
 `gh`, SMTP email):
 
 | Spec section | Code |
