@@ -1,0 +1,10 @@
+.pgdata/
+.mail/
+worktrees/
+logs/
+work/
+work-fake/
+.pixi/
+__pycache__/
+*.egg-info/
+.pytest_cache/

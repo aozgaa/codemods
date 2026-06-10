@@ -1,0 +1,34 @@
+[workspace]
+authors = ["Arthur Ozga <aozgaa@gmail.com>"]
+channels = ["conda-forge"]
+name = "codemods-spec"
+platforms = ["osx-arm64", "linux-64"]
+version = "0.1.0"
+
+[activation.env]
+CODEMODS_DSN = "postgresql://codemods@localhost:5499/codemods"
+CODEMODS_SMTP = "localhost:8025"
+
+[tasks]
+db-init = "test -d .pgdata || (initdb -D .pgdata -U codemods --auth=trust && pg_ctl -D .pgdata -l .pgdata/server.log -o '-p 5499' -w start && createdb -h localhost -p 5499 -U codemods codemods && pg_ctl -D .pgdata -w stop)"
+db-start = "pg_ctl -D .pgdata -l .pgdata/server.log -o '-p 5499' -w start"
+db-stop = "pg_ctl -D .pgdata -w stop"
+smtp-sink = "mkdir -p .mail/new .mail/cur .mail/tmp && python -m aiosmtpd -n -l localhost:8025 -c aiosmtpd.handlers.Mailbox .mail"
+test = "pytest"
+codemods = "codemods"
+
+[dependencies]
+python = ">=3.12"
+psycopg = ">=3.3.4,<4"
+python-hcl2 = ">=4.0.0,<5"
+click = ">=8.4.1,<9"
+aiosmtpd = ">=1.4.6,<2"
+pytest = ">=9.0.3,<10"
+postgresql = ">=18.4,<19"
+cmake = ">=4.3.3,<5"
+ninja = ">=1.13.2,<2"
+clang-tools = ">=22.1.7,<23"
+git = ">=2.54.0,<3"
+
+[pypi-dependencies]
+codemods = { path = ".", editable = true }
