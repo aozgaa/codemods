@@ -157,7 +157,7 @@ subtasks:
   stops itself instead of failing through the whole repository.
 - **Stage.** A campaign is in the *testing* stage or the *production*
   stage. The testing stage exists so an author can exercise a campaign
-  end-to-end without interrupting code owners (§7, authorship workflow);
+  end-to-end without interrupting code owners (§7, development workflow);
   promotion to production discards testing artifacts and starts the
   production campaign cleanly.
 
@@ -222,29 +222,40 @@ How author identity maps to permissions (who may pause or cancel whose
 campaign) is organization-specific and out of scope; the system MUST record
 the author so such policy can be enforced at the service boundary.
 
-### Authorship workflow
+### Development workflow
 
-A new campaign is wrong more often than it is right — the script breaks on
-unconsidered inputs, the decomposition is too coarse, the diff is not what
-the author intended. An implementation MUST support a testing workflow in
-which a campaign runs end-to-end — decompose, transform, verify, review,
-notify — while remaining invisible to code owners. Concretely, in the
-testing stage:
+The life of a campaign, from its author's point of view:
 
-- reviews MUST NOT request attention from code owners: marked as drafts,
-  opened against a test repository or test review system, or created
-  through a hermetic driver, per configuration;
-- notifications go to the author only (personal email, DM, …), not to
-  owner-facing channels;
-- the decomposition MAY be sampled (first N units) to keep iteration fast.
+1. **Author.** Write the run script, the optional postmod script, and the
+   campaign document, in a normal development environment against a normal
+   checkout. Nothing about authoring requires the codemods system.
+2. **Test.** Register the campaign in the testing stage and reconcile. A
+   new campaign is wrong more often than it is right — the script breaks on
+   unconsidered inputs, the decomposition is too coarse, the diff is not
+   what the author intended — so an implementation MUST support running a
+   campaign end-to-end (decompose, transform, verify, review, notify)
+   while remaining invisible to code owners. In the testing stage:
+   - reviews MUST NOT request attention from code owners: marked as
+     drafts, opened against a test repository or test review system, or
+     created through a hermetic driver, per configuration;
+   - notifications go to the author only (personal email, DM, …), not to
+     owner-facing channels;
+   - the decomposition MAY be sampled (first N units) to keep iteration
+     fast.
+3. **Iterate.** Inspect the resulting reviews and logs, fix the scripts or
+   configuration, re-register, re-test.
+4. **Promote.** Promotion abandons the testing subtasks (closing their
+   reviews) and re-decomposes the campaign cleanly in the production stage,
+   with owner-facing review and notification policies in effect.
+5. **Monitor and respond.** The campaign now runs unattended under
+   whatever execution mode the organization uses (below). The author
+   watches notifications and `status`, retries fixed failures, and adjusts
+   limits; auto-pause (§4.2) brings the author back when the campaign
+   misbehaves.
+6. **Finish.** The campaign ends when every subtask is terminal: merged,
+   no-op, or abandoned. `cancel` ends it early.
 
-The author iterates — inspect the draft reviews and logs, fix the script,
-re-test — and then **promotes**. Promotion abandons the testing subtasks
-(closing their reviews), and re-decomposes the campaign cleanly in the
-production stage with owner-facing review and notification policies in
-effect.
-
-### Execution modes
+### Execution modes and deployment
 
 The same lifecycle logic serves interactive use and service deployment: a
 one-shot reconcile command for operators and cron, and a long-running
@@ -252,6 +263,16 @@ service that repeats the reconcile (and may add concurrency under the claim
 discipline of §4.1). These are thin shells over one shared engine — the
 business logic MUST NOT be duplicated per mode. Frequency affects only
 latency, never correctness.
+
+*Where* those shells run is, like every other boundary, an enterprise norm
+and out of this document's scope: a container on a Kubernetes cluster, a
+dedicated VM, an operator's or author's personal machine, a CI scheduler,
+or a batch/job orchestrator are all valid hosts. The design imposes no
+requirement on the host beyond reachability of the state store and the
+integration endpoints (§6): all state is in the store, processes are
+disposable (§2), and claims make mixed deployments safe — a daemon in a
+cluster and an operator's ad-hoc reconcile on a laptop can share one
+database without conflict.
 
 ## 8. Configuration
 
@@ -273,7 +294,7 @@ An implementation conforms to this specification if it:
 2. provides the lifecycle requirements of §4 — subtask and campaign — on
    its chosen store;
 3. exposes the operator surface of §7, including campaign management and
-   the authorship workflow;
+   the development workflow;
 4. isolates the boundaries of §6 behind replaceable interfaces, including
    at least one review driver that requires no external service (so the
    full lifecycle is testable hermetically);

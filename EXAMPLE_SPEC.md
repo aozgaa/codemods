@@ -209,7 +209,7 @@ deterministically by registration order.
 ### 3.4 Testing-stage overrides
 
 `codemods register --test` registers a codemod in the **test** stage
-(SPEC.md §7, authorship workflow). In the test stage the effective
+(SPEC.md §7, development workflow). In the test stage the effective
 configuration is derived from the production configuration as follows:
 
 - **review** — replaced by `test.review` if present; otherwise the
@@ -531,7 +531,9 @@ claim-protected, frequency only affects latency, never correctness.
 **Daemon.** `codemods daemon` repeats `sync` on an interval until
 SIGINT/SIGTERM, exiting cleanly at a pass boundary. Multiple daemons (or a
 daemon plus ad-hoc CLI syncs) may share one database; the claim semantics
-of §5.2 prevent double-running.
+of §5.2 prevent double-running. Where it runs is up to deployment norms
+(SPEC.md §7): a systemd unit, a container, a personal machine — anything
+that reaches PostgreSQL, the target repository, and `gh`.
 
 **Future: concurrent workers.** A worker pool claiming subtasks in parallel
 requires no schema or transition changes — only a threaded shell around the
